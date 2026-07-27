@@ -1,0 +1,13 @@
+{
+    "name": "klinoklaz/onion-sprout",
+    "type": "project",
+    "authors": [
+        {
+            "name": "klinoklaz",
+            "email": "infentrilnuk@yandex.com"
+        }
+    ],
+    "require": {
+        "workerman/workerman": "^5.2"
+    }
+}
