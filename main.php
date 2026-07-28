@@ -7,9 +7,9 @@ use Workerman\Worker;
 
 require_once __DIR__ . '/vendor/autoload.php';
 
-const HOSTNAME = 'http://0.0.0.0:2345';
+const MY_SERVER = 'http://localhost:2345';
 
-$worker = new Worker(HOSTNAME);
+$worker = new Worker('http://0.0.0.0:2345');
 $worker->count = 10;
 // $worker::$logFile = __DIR__ . '/log/workerman.log';
 $worker::$logFile = '/dev/null';
@@ -28,17 +28,26 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         . $urlInfo['host']
         . (empty($urlInfo['port']) ? '' : ":$urlInfo[port]");
 
-    $header = explode("\r\n", $request->rawHead());
-    unset($header[0]); // request line
-    foreach ($header as $i => &$h) {
-        // mitigate cors error
-        if (strtolower(substr($h, 0, 5)) === 'host:') {
-            $h = 'host: ' . $urlInfo['host'];
+    $reqHeader = explode("\r\n", $request->rawHead());
+    unset($reqHeader[0]); // request line
+    foreach ($reqHeader as $i => &$h) {
+        $key = strtolower(strstr($h, ':', true));
+        switch ($key) {
+            case 'host': // mitigate 400 error
+                $h = 'host: ' . $urlInfo['host'];
+                break;
+            case 'origin':
+                $h = 'origin: ' . $origin;
+                break;
+            case 'accept-encoding': // disable compression
+                unset($reqHeader[$i]);
+                break;
         }
-        // disable compression
-        if (strtolower(substr($h, 0, 16)) === 'accept-encoding:') {
-            unset($header[$i]);
-        }
+    }
+    // current server name
+    $myServer = MY_SERVER;
+    if ($reqHost = $request->host()) {
+        $myServer = strstr($myServer, '://', true) . '://' . $reqHost;
     }
 
     $ch = curl_init();
@@ -48,7 +57,7 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $header);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $reqHeader);
     curl_setopt($ch, CURLOPT_HEADER, true); // original response header
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
@@ -83,19 +92,22 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false) {
             $resBody = preg_replace_callback(
                 '/\b(src|href)\s*=\s*([\'"])\s*(.+?)\2/i',
-                function($match) use ($origin) {
+                function($match) use ($origin, $myServer) {
                     $target = $match[3] ?? '';
                     if (substr($target, 0, 1) === '/') {
                         $target = $origin . $target;
                     }
                     return "$match[1]=$match[2]"
-                        . HOSTNAME . '/' . $target . $match[2];
+                        . $myServer . '/' . $target . $match[2];
                 },
                 $resBody);
         }
 
         if (isset($resHeader['Content-Length'])) {
             $resHeader['Content-Length'] = strlen($resBody);
+        }
+        if (isset($resHeader['Access-Control-Allow-Origin'])) {
+            $resHeader['Access-Control-Allow-Origin'] = $myServer;
         }
         $data = new Response($hMatch[2] ?? 200, $resHeader, $resBody);
         // server doesn't support http/2
