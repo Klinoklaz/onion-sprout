@@ -20,10 +20,19 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
 
     $url = substr($request->uri(), 1);
     $urlInfo = parse_url($url);
+    // resolve js import etc.
+    if (empty($urlInfo['host']) && $ref = $request->header('referer')) {
+        if (preg_match('~^[^:]+://[^/]+/([^:]+://[^/]+)/~', $ref, $rMatch)) {
+            $url = $rMatch[1]
+                . ($url && $url[0] === '/' ? '' : '/') . $url;
+            $urlInfo = parse_url($url);
+        }
+    }
     if (empty($urlInfo['host'])) {
         $connection->send("Could not parse url: $url");
         return;
     }
+
     $origin = ($urlInfo['scheme'] ?? 'http') . '://'
         . $urlInfo['host']
         . (empty($urlInfo['port']) ? '' : ":$urlInfo[port]");
