@@ -8,6 +8,11 @@ use Workerman\Worker;
 require_once __DIR__ . '/vendor/autoload.php';
 
 const MY_SERVER = 'http://localhost:2345';
+const CURL_PROXY = [
+    CURLOPT_PROXY => '127.0.0.1:7891',
+    CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME,
+    // CURLOPT_PROXYUSERPWD => 'username:password',
+];
 
 $worker = new Worker('http://0.0.0.0:2345');
 $worker->count = 10;
@@ -59,16 +64,20 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         $myServer = strstr($myServer, '://', true) . '://' . $reqHost;
     }
 
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_AUTOREFERER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $reqHeader);
-    curl_setopt($ch, CURLOPT_HEADER, true); // original response header
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_AUTOREFERER => true,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
+        CURLOPT_HTTPHEADER => $reqHeader,
+        CURLOPT_HEADER => true, // retrieve original response header
+        CURLOPT_RETURNTRANSFER => true,
+    ]);
+    if (CURL_PROXY) {
+        curl_setopt_array($ch, CURL_PROXY);
+    }
 
     $data = curl_exec($ch);
     if ($data === false) {
@@ -119,8 +128,6 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
             $resHeader['Access-Control-Allow-Origin'] = $myServer;
         }
         $data = new Response($hMatch[2] ?? 200, $resHeader, $resBody);
-        // server doesn't support http/2
-        // $data->withProtocolVersion($hMatch[1] ?? '1.1');
     }
 
     curl_close($ch);
