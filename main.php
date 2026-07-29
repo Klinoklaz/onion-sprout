@@ -1,5 +1,6 @@
 <?php
 
+use Symfony\Component\Dotenv\Dotenv;
 use Workerman\Connection\TcpConnection;
 use Workerman\Protocols\Http\Request;
 use Workerman\Protocols\Http\Response;
@@ -7,17 +8,32 @@ use Workerman\Worker;
 
 require_once __DIR__ . '/vendor/autoload.php';
 
-const MY_SERVER = 'http://localhost:2345';
-const CURL_PROXY = [
-    CURLOPT_PROXY => '127.0.0.1:7891',
-    CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME,
-    // CURLOPT_PROXYUSERPWD => 'username:password',
-];
+(new Dotenv())->overload(__DIR__ . '/.env');
 
-$worker = new Worker('http://0.0.0.0:2345');
-$worker->count = 10;
-// $worker::$logFile = __DIR__ . '/log/workerman.log';
-$worker::$logFile = '/dev/null';
+function env(string $name, $default = null) {
+    return $_ENV[strtoupper($name)] ?? $default;
+}
+
+$worker = new Worker(env('LISTEN_ADDR'));
+$worker->count = env('WORKER_POOL', 10);
+$worker::$logFile = env('LOG_DIR');
+
+$curlOpt = [
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_AUTOREFERER => true,
+    CURLOPT_TIMEOUT => 30,
+    CURLOPT_SSL_VERIFYPEER => false,
+    CURLOPT_SSL_VERIFYHOST => 0,
+    CURLOPT_HEADER => true, // retrieve original response header
+    CURLOPT_RETURNTRANSFER => true,
+];
+if ($proxy = env('PROXY_ADDR')) {
+    $curlOpt[CURLOPT_PROXY] = $proxy;
+    $curlOpt[CURLOPT_PROXYTYPE] = env('PROXY_TYPE', CURLPROXY_SOCKS5_HOSTNAME);
+    $curlOpt[CURLOPT_PROXYUSERPWD] = env('PROXY_AUTH');
+}
+$ch = curl_init();
+curl_setopt_array($ch, $curlOpt);
 
 // request handler
 $worker->onMessage = function (TcpConnection $connection, Request $request) {
@@ -59,25 +75,16 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         }
     }
     // current server name
-    $myServer = MY_SERVER;
+    $myServer = env('HOSTNAME', 'http://localhost');
     if ($reqHost = $request->host()) {
         $myServer = strstr($myServer, '://', true) . '://' . $reqHost;
     }
 
-    $ch = curl_init($url);
+    global $ch;
     curl_setopt_array($ch, [
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_AUTOREFERER => true,
-        CURLOPT_TIMEOUT => 30,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => 0,
+        CURLOPT_URL => $url,
         CURLOPT_HTTPHEADER => $reqHeader,
-        CURLOPT_HEADER => true, // retrieve original response header
-        CURLOPT_RETURNTRANSFER => true,
     ]);
-    if (CURL_PROXY) {
-        curl_setopt_array($ch, CURL_PROXY);
-    }
 
     $data = curl_exec($ch);
     if ($data === false) {
@@ -134,7 +141,6 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         $data = new Response($hMatch[2] ?? 200, $resHeader, $resBody);
     }
 
-    curl_close($ch);
     $connection->send($data);
 };
 

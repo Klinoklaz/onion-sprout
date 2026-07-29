@@ -8,6 +8,7 @@
         }
     ],
     "require": {
-        "workerman/workerman": "^5.2"
+        "workerman/workerman": "^5.2",
+        "symfony/dotenv": "^7.4"
     }
 }
