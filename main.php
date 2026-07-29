@@ -27,7 +27,7 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
     $urlInfo = parse_url($url);
     // resolve js import etc.
     if (empty($urlInfo['host']) && $ref = $request->header('referer')) {
-        if (preg_match('~^[^:]+://[^/]+/([^:]+://[^/]+)/~', $ref, $rMatch)) {
+        if (preg_match('~^[^:]+://[^/]+/([^:]+://[^/]+)~', $ref, $rMatch)) {
             $url = $rMatch[1]
                 . ($url && $url[0] === '/' ? '' : '/') . $url;
             $urlInfo = parse_url($url);
@@ -126,6 +126,10 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         }
         if (isset($resHeader['Access-Control-Allow-Origin'])) {
             $resHeader['Access-Control-Allow-Origin'] = $myServer;
+        }
+        // data already assembled by curl and doesn't contain end marker
+        if (strtolower($resHeader['Transfer-Encoding'] ?? '') === 'chunked') {
+            unset($resHeader['Transfer-Encoding']);
         }
         $data = new Response($hMatch[2] ?? 200, $resHeader, $resBody);
     }
