@@ -116,7 +116,7 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         // point every url to current server
         if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false) {
             $resBody = preg_replace_callback(
-                '/\b(src|href)\s*=\s*([\'"])\s*(.+?)\2/i',
+                '/\b(src|href)\s*=\s*([\'"])\s*(?!data:)(.+?)\2/i',
                 function($match) use ($origin, $myServer) {
                     $target = $match[3] ?? '';
                     if (substr($target, 0, 1) === '/') {
