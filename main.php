@@ -16,12 +16,14 @@ function env(string $name, $default = null) {
 
 $worker = new Worker(env('LISTEN_ADDR'));
 $worker->count = env('WORKER_POOL', 10);
-$worker::$logFile = env('LOG_DIR');
+$worker::$logFile = env('LOG_FILE');
 
 $curlOpt = [
     CURLOPT_FOLLOWLOCATION => true,
     CURLOPT_AUTOREFERER => true,
-    CURLOPT_TIMEOUT => 30,
+    CURLOPT_TIMEOUT => env('REQUEST_TIMEOUT', 30),
+    // avoid reassemble of http2 response
+    CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
     CURLOPT_SSL_VERIFYPEER => false,
     CURLOPT_SSL_VERIFYHOST => 0,
     CURLOPT_HEADER => true, // retrieve original response header
@@ -128,9 +130,12 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
                 $resBody);
         }
 
-        if (isset($resHeader['Content-Length'])) {
-            $resHeader['Content-Length'] = strlen($resBody);
-        }
+        unset(
+            $resHeader['Content-Length'],
+            $resHeader['Set-Cookie'],
+            $resHeader['X-Frame-Options'], // allow embedding
+            $resHeader['Content-Security-Policy']
+        );
         if (isset($resHeader['Access-Control-Allow-Origin'])) {
             $resHeader['Access-Control-Allow-Origin'] = $myServer;
         }
