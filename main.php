@@ -14,9 +14,13 @@ function env(string $name, $default = null) {
     return $_ENV[strtoupper($name)] ?? $default;
 }
 
-$worker = new Worker(env('LISTEN_ADDR'));
+$worker = new Worker($workerAddr = env('LISTEN_ADDR'));
 $worker->count = env('WORKER_POOL', 10);
 $worker::$logFile = env('LOG_FILE');
+
+$rewriteRules = json_decode(env('REWRITE_RULES'), true);
+$workerHost = preg_replace('~^[^:]+://~', '', $workerAddr);
+$rewriteRules[$workerHost] = $workerAddr;
 
 $curlOpt = [
     CURLOPT_FOLLOWLOCATION => true,
@@ -39,6 +43,13 @@ curl_setopt_array($ch, $curlOpt);
 
 // request handler
 $worker->onMessage = function (TcpConnection $connection, Request $request) {
+    global $rewriteRules;
+    $prefix = $rewriteRules[$request->host()] ?? '';
+    if (empty($prefix)) {
+        $connection->close('Bad request');
+        return;
+    }
+
     $method = strtoupper($request->method()); // todo
 
     $url = substr($request->uri(), 1);
@@ -52,7 +63,7 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         }
     }
     if (empty($urlInfo['host'])) {
-        $connection->send("Could not parse url: $url");
+        $connection->close("Could not parse url: $url");
         return;
     }
 
@@ -75,11 +86,6 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
                 unset($reqHeader[$i]);
                 break;
         }
-    }
-    // current server name
-    $myServer = env('HOSTNAME', 'http://localhost');
-    if ($reqHost = $request->host()) {
-        $myServer = strstr($myServer, '://', true) . '://' . $reqHost;
     }
 
     global $ch;
@@ -119,13 +125,13 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false) {
             $resBody = preg_replace_callback(
                 '/\b(src|href)\s*=\s*([\'"])\s*(?!data:)(.+?)\2/i',
-                function($match) use ($origin, $myServer) {
+                function($match) use ($origin, $prefix) {
                     $target = $match[3] ?? '';
                     if (substr($target, 0, 1) === '/') {
                         $target = $origin . $target;
                     }
                     return "$match[1]=$match[2]"
-                        . $myServer . '/' . $target . $match[2];
+                        . $prefix . '/' . $target . $match[2];
                 },
                 $resBody);
         }
@@ -136,9 +142,8 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
             $resHeader['X-Frame-Options'], // allow embedding
             $resHeader['Content-Security-Policy']
         );
-        if (isset($resHeader['Access-Control-Allow-Origin'])) {
-            $resHeader['Access-Control-Allow-Origin'] = $myServer;
-        }
+        $newOrigin = preg_replace('~(?<!/)/(?!/).*$~', '', $prefix);
+        $resHeader['Access-Control-Allow-Origin'] = $newOrigin;
         // data already assembled by curl and doesn't contain end marker
         if (strtolower($resHeader['Transfer-Encoding'] ?? '') === 'chunked') {
             unset($resHeader['Transfer-Encoding']);
