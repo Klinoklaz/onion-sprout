@@ -41,6 +41,8 @@ if ($proxy = env('PROXY_ADDR')) {
 $ch = curl_init();
 curl_setopt_array($ch, $curlOpt);
 
+$sneakyFetch = file_get_contents('sneaky_fetch.js');
+
 // request handler
 $worker->onMessage = function (TcpConnection $connection, Request $request) {
     global $rewriteRules;
@@ -134,6 +136,15 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
                         . $prefix . '/' . $target . $match[2];
                 },
                 $resBody);
+            // alter js behavior
+            global $sneakyFetch;
+            if (($tpos = strpos($resBody, '</title>')) !== false) {
+                $resBody = substr($resBody, 0, $tpos + 8)
+                    . "\n<script>\n"
+                    . str_replace('MY_SERVER', "'$myServer'", $sneakyFetch)
+                    . "\n</script>\n"
+                    . substr($resBody, $tpos + 8);
+            }
         }
 
         unset(
