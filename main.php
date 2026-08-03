@@ -52,8 +52,6 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         return;
     }
 
-    $method = strtoupper($request->method()); // todo
-
     $url = substr($request->uri(), 1);
     $urlInfo = parse_url($url);
     // resolve js import etc.
@@ -90,11 +88,23 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         }
     }
 
-    global $ch;
-    curl_setopt_array($ch, [
+    $curlOptExt = [
         CURLOPT_URL => $url,
         CURLOPT_HTTPHEADER => $reqHeader,
-    ]);
+    ];
+    $method = strtoupper($request->method());
+    if (in_array($method, ['POST', 'PUT', 'PATCH'])) {
+        $curlOptExt[CURLOPT_CUSTOMREQUEST] = $method;
+        $curlOptExt[CURLOPT_POSTFIELDS] = $request->rawBody();
+    } else if ($method === 'GET') {
+        $curlOptExt[CURLOPT_HTTPGET] = true;
+    } else if ($method === 'HEAD') {
+        $curlOptExt[CURLOPT_NOBODY] = true;
+    } else {
+        $curlOptExt[CURLOPT_CUSTOMREQUEST] = $method;
+    }
+    global $ch;
+    curl_setopt_array($ch, $curlOptExt);
 
     $data = curl_exec($ch);
     if ($data === false) {
@@ -167,6 +177,12 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
     }
 
     $connection->send($data);
+
+    curl_setopt_array($ch, [
+        CURLOPT_CUSTOMREQUEST => null,
+        CURLOPT_NOBODY => false,
+        CURLOPT_POSTFIELDS => null,
+    ]);
 };
 
 Worker::runAll();
