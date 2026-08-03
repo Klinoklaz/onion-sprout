@@ -41,7 +41,7 @@ if ($proxy = env('PROXY_ADDR')) {
 $ch = curl_init();
 curl_setopt_array($ch, $curlOpt);
 
-$sneakyFetch = file_get_contents('sneaky_fetch.js');
+$injectJs = file_get_contents('inject.js');
 
 // request handler
 $worker->onMessage = function (TcpConnection $connection, Request $request) {
@@ -126,7 +126,7 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         // point every url to current server
         if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false) {
             $resBody = preg_replace_callback(
-                '/\b(src|href)\s*=\s*([\'"])\s*(?!data:)(.+?)\2/i',
+                '/\b(src|href|action|formaction)\s*=\s*([\'"])\s*(?!data:)(.+?)\2/i',
                 function($match) use ($origin, $prefix) {
                     $target = $match[3] ?? '';
                     if (substr($target, 0, 1) === '/') {
@@ -137,11 +137,15 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
                 },
                 $resBody);
             // alter js behavior
-            global $sneakyFetch;
+            global $injectJs;
             if (($tpos = strpos($resBody, '</title>')) !== false) {
+                $js = str_replace(
+                    ['MY_SERVER', 'ORIGIN'],
+                    ["'$prefix'", "'$origin'"],
+                    $injectJs);
                 $resBody = substr($resBody, 0, $tpos + 8)
                     . "\n<script>\n"
-                    . str_replace('MY_SERVER', "'$myServer'", $sneakyFetch)
+                    . $js
                     . "\n</script>\n"
                     . substr($resBody, $tpos + 8);
             }
