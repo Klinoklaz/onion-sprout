@@ -133,39 +133,27 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         }
 
         $resBody = substr($data, $hSize);
-        // point every url to current server
-        if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false) {
-            $resBody = preg_replace_callback(
-                '/\b(src|href|action|formaction)\s*=\s*([\'"])\s*(?!data:)(.+?)\2/i',
-                function($match) use ($origin, $prefix) {
-                    $target = $match[3] ?? '';
-                    if (substr($target, 0, 1) === '/') {
-                        $target = $origin . $target;
-                    }
-                    return "$match[1]=$match[2]"
-                        . $prefix . '/' . $target . $match[2];
-                },
-                $resBody);
-            // alter js behavior
+        // alter js behavior
+        if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false
+            && ($tpos = strpos($resBody, '</title>')) !== false)
+        {
             global $injectJs;
-            if (($tpos = strpos($resBody, '</title>')) !== false) {
-                $js = str_replace(
-                    ['MY_SERVER', 'ORIGIN'],
-                    ["'$prefix'", "'$origin'"],
-                    $injectJs);
-                $resBody = substr($resBody, 0, $tpos + 8)
-                    . "\n<script>\n"
-                    . $js
-                    . "\n</script>\n"
-                    . substr($resBody, $tpos + 8);
-            }
+            $js = str_replace(
+                ['MY_SERVER', 'ORIGIN'],
+                ["'$prefix'", "'$origin'"], $injectJs);
+            $resBody = substr($resBody, 0, $tpos + 8)
+                . "\n<script>\n"
+                . $js
+                . "\n</script>\n"
+                . substr($resBody, $tpos + 8);
         }
 
         unset(
             $resHeader['Content-Length'],
             $resHeader['Set-Cookie'],
             $resHeader['X-Frame-Options'], // allow embedding
-            $resHeader['Content-Security-Policy']
+            $resHeader['Content-Security-Policy'],
+            $resHeader['Content-Security-Policy-Report-Only'],
         );
         $newOrigin = preg_replace('~(?<!/)/(?!/).*$~', '', $prefix);
         $resHeader['Access-Control-Allow-Origin'] = $newOrigin;
