@@ -22,12 +22,12 @@
         return oldUrl
     }
 
-    // deal with js remote import
+    // deal with js remote import etc.
     const rewriteJs = (js) => {
-        const r = /\b(import\s*\(?|from)\s*(['"])\s*(https?:\/\/.*?)\2/g
-        return js.replace(r, (match, s1, s2, s3) =>
-            new URL(s3).hostname === myServerObj.hostname
-                ? match : s1 + ' ' + s2 + MY_SERVER + '/' + s3 + s2)
+        const r = /(['"])\s*(https?:\/\/.*?)\1/g
+        return js.replace(r, (match, s1, s2) =>
+            new URL(s2).hostname === myServerObj.hostname
+                ? match : s1 + MY_SERVER + '/' + s2 + s1)
     }
 
     const doRewrite = (node) => {
@@ -89,12 +89,53 @@
     if (!'MutationObserver' in globalThis) {
         return
     }
+
+    // deal with lazy loading
+    setInterval(() => {
+        const list = document.querySelectorAll('img,iframe,video,audio')
+        list.forEach(item => {
+            const newSrc = rewrite(item.src)
+            if (newSrc != item.src) {
+                item.src = newSrc
+            }
+        })
+    }, 1000)
+    // const watchList = ['IMG', 'VIDEO', 'AUDIO', 'IFRAME']
+    // const lazyObOption = {
+    //     attributes: true,
+    //     attributeFilter: ['src']
+    // }
+    // const lazyObserver = new MutationObserver((muList) => {
+    //     for (const mutation of muList) {
+    //         if (mutation.type !== 'attributes'
+    //             || mutation.attributeName !== 'src') {
+    //             continue
+    //         }
+    //         const newSrc = rewrite(mutation.target.src)
+    //         if (newSrc != mutation.target.src) {
+    //             mutation.target.src = newSrc
+    //         }
+    //     }
+    // })
+    // document.addEventListener('DOMContentLoaded', () => {
+    //     document.querySelectorAll('img,iframe,video,audio')
+    //         .forEach(item => {
+    //             lazyObserver.observe(item, lazyObOption)
+    //         })
+    // })
+
     // rewrite links in dynamic elements
     const observer = new MutationObserver((muList) => {
         for (const mutation of muList) {
-            if (mutation.type === 'childList') {
-                mutation.addedNodes.forEach(doRewrite)
+            if (mutation.type !== 'childList') {
+                continue
             }
+            mutation.addedNodes.forEach(item => {
+                doRewrite(item)
+                // if (watchList.includes(item.tagName)) {
+                //     lazyObserver.observe(item, lazyObOption)
+                // }
+            })
         }
     })
     observer.observe(document.documentElement, {childList: true, subtree: true})

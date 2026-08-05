@@ -41,7 +41,7 @@ if ($proxy = env('PROXY_ADDR')) {
 $ch = curl_init();
 curl_setopt_array($ch, $curlOpt);
 
-$injectJs = file_get_contents('inject.js');
+$injectJs = file_get_contents('inject2.js');
 
 // request handler
 $worker->onMessage = function (TcpConnection $connection, Request $request) {
@@ -133,19 +133,22 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         }
 
         $resBody = substr($data, $hSize);
-        // alter js behavior
-        if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false
-            && ($tpos = strpos($resBody, '</title>')) !== false)
-        {
+        // alter js behavior — inject as early as possible in <head>
+        if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false) {
             global $injectJs;
             $js = str_replace(
                 ['MY_SERVER', 'ORIGIN'],
                 ["'$prefix'", "'$origin'"], $injectJs);
-            $resBody = substr($resBody, 0, $tpos + 8)
-                . "\n<script>\n"
-                . $js
-                . "\n</script>\n"
-                . substr($resBody, $tpos + 8);
+            $snippet = "\n<script>\n" . $js . "\n</script>\n";
+            if (preg_match('/<head\b[^>]*>/i', $resBody, $m, PREG_OFFSET_CAPTURE)) {
+                $pos = $m[0][1] + strlen($m[0][0]);
+                $resBody = substr($resBody, 0, $pos) . $snippet . substr($resBody, $pos);
+            } elseif (($tpos = stripos($resBody, '</title>')) !== false) {
+                $resBody = substr($resBody, 0, $tpos + 8) . $snippet . substr($resBody, $tpos + 8);
+            } elseif (preg_match('/<html\b[^>]*>/i', $resBody, $m, PREG_OFFSET_CAPTURE)) {
+                $pos = $m[0][1] + strlen($m[0][0]);
+                $resBody = substr($resBody, 0, $pos) . $snippet . substr($resBody, $pos);
+            }
         }
 
         unset(
