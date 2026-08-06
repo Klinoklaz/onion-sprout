@@ -41,7 +41,7 @@ if ($proxy = env('PROXY_ADDR')) {
 $ch = curl_init();
 curl_setopt_array($ch, $curlOpt);
 
-$injectJs = file_get_contents('inject2.js');
+$injectJs = file_get_contents('inject.js');
 
 // request handler
 $worker->onMessage = function (TcpConnection $connection, Request $request) {
@@ -139,15 +139,17 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
             $js = str_replace(
                 ['MY_SERVER', 'ORIGIN'],
                 ["'$prefix'", "'$origin'"], $injectJs);
-            $snippet = "\n<script>\n" . $js . "\n</script>\n";
-            if (preg_match('/<head\b[^>]*>/i', $resBody, $m, PREG_OFFSET_CAPTURE)) {
-                $pos = $m[0][1] + strlen($m[0][0]);
-                $resBody = substr($resBody, 0, $pos) . $snippet . substr($resBody, $pos);
-            } elseif (($tpos = stripos($resBody, '</title>')) !== false) {
-                $resBody = substr($resBody, 0, $tpos + 8) . $snippet . substr($resBody, $tpos + 8);
-            } elseif (preg_match('/<html\b[^>]*>/i', $resBody, $m, PREG_OFFSET_CAPTURE)) {
-                $pos = $m[0][1] + strlen($m[0][0]);
-                $resBody = substr($resBody, 0, $pos) . $snippet . substr($resBody, $pos);
+            $js = "\n<script>\n" . $js . "\n</script>\n";
+            $tryMatch = [
+                '/<head(?:\s+[^>]+)?>/i',
+                '/<body(?:\s+[^>]+)?>/i',
+            ];
+            foreach ($tryMatch as $pattern) {
+                if (preg_match($pattern, $resBody, $m, PREG_OFFSET_CAPTURE)) {
+                    $pos = $m[0][1] + strlen($m[0][0]);
+                    $resBody = substr($resBody, 0, $pos) . $js . substr($resBody, $pos);
+                    break;
+                }
             }
         }
 
