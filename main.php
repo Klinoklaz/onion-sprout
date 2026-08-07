@@ -41,6 +41,7 @@ if ($proxy = env('PROXY_ADDR')) {
 $ch = curl_init();
 curl_setopt_array($ch, $curlOpt);
 
+$debug = !empty(env('DEBUG'));
 $injectJs = file_get_contents('inject.js');
 
 // request handler
@@ -48,7 +49,7 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
     global $rewriteRules;
     $prefix = $rewriteRules[$request->host()] ?? '';
     if (empty($prefix)) {
-        $connection->close('Bad request');
+        $connection->close(new Response(400, [], 'Bad request'));
         return;
     }
 
@@ -63,7 +64,8 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         }
     }
     if (empty($urlInfo['host'])) {
-        $connection->close("Could not parse url: $url");
+        $connection->close(
+            new Response(400, [], "Could not parse url: $url"));
         return;
     }
 
@@ -107,8 +109,14 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
     curl_setopt_array($ch, $curlOptExt);
 
     $data = curl_exec($ch);
+    $statusCode = 200;
     if ($data === false) {
-        $data = curl_error($ch);
+        $error = curl_error($ch);
+        global $debug, $worker;
+        $data = $debug ? $error
+            : 'Network error, unable to get response from ' . $url;
+        $statusCode = 502;
+        $worker->log('[error]' . $error . " ($url)");
     } else {
         $hSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
         // deal with header accumulation caused by redirection
@@ -132,6 +140,7 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
             }
         }
 
+        $statusCode = $hMatch[2] ?? $statusCode;
         $resBody = substr($data, $hSize);
         // alter js behavior — inject as early as possible in <head>
         if (strpos($resHeader['Content-Type'] ?? '', 'text/html') !== false) {
@@ -166,7 +175,7 @@ $worker->onMessage = function (TcpConnection $connection, Request $request) {
         if (strtolower($resHeader['Transfer-Encoding'] ?? '') === 'chunked') {
             unset($resHeader['Transfer-Encoding']);
         }
-        $data = new Response($hMatch[2] ?? 200, $resHeader, $resBody);
+        $data = new Response($statusCode, $resHeader, $resBody);
     }
 
     $connection->send($data);
