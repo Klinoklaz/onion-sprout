@@ -123,7 +123,7 @@
         // force script reload
         if (node.tagName === 'SCRIPT' && !node._altered) {
             const parent = node.parentElement
-            parent && parent.removeChild(node)
+            parent?.removeChild(node)
             node = node.cloneNode(true)
             // prevent recursion in mu observer
             node._altered = true
@@ -131,7 +131,7 @@
                 node.src = rewrite(node.src)
             }
             node.textContent = rewriteJs(node.textContent)
-            parent && parent.appendChild(node)
+            parent?.appendChild(node)
         } else if (node.src) {
             node.src = rewrite(node.src)
         }
@@ -155,11 +155,18 @@
     const attrSelector = urlAttr.map(a => '[' + a + ']').join(',')
     document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll(attrSelector).forEach(doRewrite)
+        // for iframe host page
+        if (window.parent === window) {
+            return
+        }
+        window.parent.postMessage({
+            name: 'SUBFRAME_INFO',
+            title: document.querySelector('title')?.innerText,
+            height: document.documentElement.scrollHeight,
+            favicon: document.querySelector('link[rel*="icon"]')?.href
+        }, '*')
     })
 
-    if (!'MutationObserver' in globalThis) {
-        return
-    }
     // rewrite links in dynamic elements
     const observer = new MutationObserver((muList) => {
         for (const mutation of muList) {
@@ -167,10 +174,11 @@
                 continue
             }
             mutation.addedNodes.forEach(item => {
-                doRewrite(item)
-                if (item instanceof Element) {
-                    item.querySelectorAll(attrSelector).forEach(doRewrite)
+                if (!(item instanceof Element)) {
+                    return
                 }
+                doRewrite(item)
+                item.querySelectorAll(attrSelector).forEach(doRewrite)
             })
         }
     })
