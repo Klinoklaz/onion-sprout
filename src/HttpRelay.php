@@ -7,7 +7,8 @@ use Workerman\Protocols\Http\Request;
 use Workerman\Protocols\Http\Response;
 use Workerman\Worker;
 
-class HttpRelay extends Worker {
+class HttpRelay extends Worker
+{
     private const array INIT_CURLOPT = [
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_AUTOREFERER => true,
@@ -18,6 +19,7 @@ class HttpRelay extends Worker {
         // avoid reassemble of http2 response
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
     ];
+    private const int PROBE_INTERVAL = 2;
     private const string INJECT_JS = __DIR__ . '/../inject.js';
 
     private bool $debug;
@@ -122,13 +124,9 @@ class HttpRelay extends Worker {
         }
 
         // setup cancel function
-        static $shouldCancel = [
-            $conn::STATUS_CLOSING,
-            $conn::STATUS_CLOSED,
-            $conn::STATUS_ENDING,
-        ];
+        $probeStart = time();
         $cancel = fn(): int
-            => in_array($conn->getStatus(), $shouldCancel) ? 1 : 0;
+            => $this->probeClient($conn, $probeStart);
         $curlOpt[CURLOPT_NOPROGRESS] = false;
         if (defined('CURLOPT_XFERINFOFUNCTION')) {
             $curlOpt[CURLOPT_XFERINFOFUNCTION] = $cancel;
@@ -149,6 +147,28 @@ class HttpRelay extends Worker {
             : 'Network error, unable to get response from ' . $targetUrl;
         $conn->close(new Response(502, [], $res));
         $this->logError($error . " ($targetUrl)");
+    }
+
+    private function probeClient(TcpConnection $conn, int $start): int
+    {
+        if (in_array($conn->getStatus(), [
+            $conn::STATUS_CLOSING,
+            $conn::STATUS_CLOSED,
+            $conn::STATUS_ENDING,
+        ])) {
+            return 1;
+        }
+        if (time() - $start < self::PROBE_INTERVAL) {
+            return 0;
+        }
+        $socket = $conn->getSocket();
+        try {
+            $res = @fwrite($socket, '');
+        } catch (\Throwable $t) {
+            $this->logError('Probing failed: '
+                . $conn->getRemoteIp() . ' ' . $t->getMessage());
+        }
+        return !isset($res) || $res === false || feof($socket) ? 1 : 0;
     }
 
     private function modifyResponse(
