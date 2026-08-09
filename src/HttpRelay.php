@@ -19,40 +19,56 @@ class HttpRelay extends Worker
         // avoid reassemble of http2 response
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
     ];
+
+    private const int LOG_DEBUG = 0;
+    private const int LOG_INFO = 1;
+    private const int LOG_WARNING = 2;
+    private const int LOG_ERROR = 3;
     private const int PROBE_INTERVAL = 2;
     private const string INJECT_JS = __DIR__ . '/../inject.js';
 
-    private bool $debug;
+    private int $logLevel;
     private string $injectJs;
     private string $log;
     private \CurlHandle $ch;
+    private array $curlOpt = self::INIT_CURLOPT;
     private array $prefixRules;
 
     public function __construct(callable $config)
     {
-        parent::__construct($workerAddr = $config('LISTEN_ADDR'));
+        parent::__construct($config('LISTEN_ADDR'));
         $this->count = $config('WORKER_POOL', 10);
         $this->log = $config('LOG_FILE', 'php://stderr');
         $this->onMessage = [$this, 'onMessage'];
+        $this->onWorkerStart = [$this, 'onWorkerStart'];
 
-        $curlOpt = self::INIT_CURLOPT;
+        $this->curlOpt = self::INIT_CURLOPT;
         if ($proxy = $config('PROXY_ADDR')) {
-            $curlOpt[CURLOPT_PROXY] = $proxy;
-            $curlOpt[CURLOPT_PROXYTYPE]
+            $this->curlOpt[CURLOPT_PROXY] = $proxy;
+            $this->curlOpt[CURLOPT_PROXYTYPE]
                 = $config('PROXY_TYPE', CURLPROXY_SOCKS5_HOSTNAME);
-            $curlOpt[CURLOPT_PROXYUSERPWD] = $config('PROXY_AUTH');
+            $this->curlOpt[CURLOPT_PROXYUSERPWD] = $config('PROXY_AUTH');
         }
-        $curlOpt[CURLOPT_TIMEOUT] = $config('REQUEST_TIMEOUT', 30);
-        $this->ch = curl_init();
-        curl_setopt_array($this->ch, $curlOpt);
+        $this->curlOpt[CURLOPT_TIMEOUT] = $config('REQUEST_TIMEOUT', 30);
 
-        $this->debug = !empty($config('DEBUG'));
+        $this->logLevel = $config('LOG_LEVEL', self::LOG_ERROR);
         $this->injectJs = file_get_contents(self::INJECT_JS);
 
         // ['hostname' => 'prefix']
         $this->prefixRules = json_decode($config('PREFIX_RULES'), true) ?: [];
-        $workerHost = preg_replace('~^[^:]+://~', '', $workerAddr);
-        $this->prefixRules[$workerHost] = $workerAddr;
+        [, $workerHost] = $this->extractOriginAndHost($this->socketName);
+        $this->prefixRules[$workerHost] = $this->socketName;
+    }
+
+    /**
+     * Will run after pcntl_fork()
+     *
+     * @return void
+     */
+    public function onWorkerStart()
+    {
+        $this->ch = curl_init();
+        curl_setopt_array($this->ch, $this->curlOpt);
     }
 
     public function onMessage(TcpConnection $conn, Request $request)
@@ -96,9 +112,9 @@ class HttpRelay extends Worker
                 case 'accept-encoding':
                     break; // disable compression
                 case 'referer':
-                    $preLen = strlen($prefix) + 1;
-                    if (substr($v, 0, $preLen) === $prefix) {
-                        $v = substr($v, $preLen);
+                    $pLen = strlen($prefix);
+                    if (substr($v, 0, $pLen) === $prefix) {
+                        $v = substr($v, $pLen + 1);
                     }
                     $reqHeader[] = 'Referer: ' . $v;
                     break;
@@ -124,9 +140,7 @@ class HttpRelay extends Worker
         }
 
         // setup cancel function
-        $probeStart = time();
-        $cancel = fn(): int
-            => $this->probeClient($conn, $probeStart);
+        $cancel = fn(): int => $this->probeClient($conn);
         $curlOpt[CURLOPT_NOPROGRESS] = false;
         if (defined('CURLOPT_XFERINFOFUNCTION')) {
             $curlOpt[CURLOPT_XFERINFOFUNCTION] = $cancel;
@@ -143,13 +157,18 @@ class HttpRelay extends Worker
         }
 
         $error = curl_error($this->ch);
-        $res = $this->debug ? $error
-            : 'Network error, unable to get response from ' . $targetUrl;
-        $conn->close(new Response(502, [], $res));
-        $this->logError($error . " ($targetUrl)");
+        $conn->close(new Response(502, [],
+            'Network error, unable to get response from ' . $targetUrl));
+        $this->internalLog($error . " ($targetUrl)");
     }
 
-    private function probeClient(TcpConnection $conn, int $start): int
+    /**
+     * Detect client disconnect by sending empty tcp payload
+     *
+     * @param TcpConnection $conn
+     * @return integer 1 => disconnected, 0 => valid
+     */
+    private function probeClient(TcpConnection $conn): int
     {
         if (in_array($conn->getStatus(), [
             $conn::STATUS_CLOSING,
@@ -158,15 +177,17 @@ class HttpRelay extends Worker
         ])) {
             return 1;
         }
-        if (time() - $start < self::PROBE_INTERVAL) {
+        static $start = time();
+        if (($now = time()) - $start < self::PROBE_INTERVAL) {
             return 0;
         }
+        $start = $now;
         $socket = $conn->getSocket();
         try {
             $res = @fwrite($socket, '');
         } catch (\Throwable $t) {
-            $this->logError('Probing failed: '
-                . $conn->getRemoteIp() . ' ' . $t->getMessage());
+            $this->internalLog('Probing failed: '
+                . $conn->getRemoteAddress() . ' ' . $t->getMessage());
         }
         return !isset($res) || $res === false || feof($socket) ? 1 : 0;
     }
@@ -225,9 +246,20 @@ class HttpRelay extends Worker
         return new Response($statusCode, $headers, $body);
     }
 
-    private function logError(string $msg)
+    /**
+     * Alternative to Worker::log()
+     *
+     * @param string $msg
+     * @param int $level
+     * @return void
+     */
+    private function internalLog(string $msg, int $level = self::LOG_ERROR)
     {
-        $entry = sprintf("[%s][ERROR] %s\n", date('Y-m-d H:i:s'), $msg);
+        if ($level < $this->logLevel) {
+            return;
+        }
+        $l = ['DEBUG', 'INFO', 'WARNING', 'ERROR'][$level] ?? 'UNKNOWN';
+        $entry = sprintf("[%s][%s] %s\n", date('Y-m-d H:i:s'), $l, $msg);
         file_put_contents($this->log, $entry, FILE_APPEND);
     }
 
