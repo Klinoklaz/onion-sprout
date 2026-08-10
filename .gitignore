@@ -2,4 +2,5 @@
 /log
 /vendor
 .env
+*.log
 *.pid

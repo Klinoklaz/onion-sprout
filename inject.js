@@ -116,45 +116,52 @@
     hookUrlProperty(HTMLInputElement.prototype, 'formaction')
     hookUrlProperty(HTMLButtonElement.prototype, 'formaction')
 
-    const doRewrite = (node) => {
-        if (!(node instanceof Element)) {
+    // force script reload
+    const reloadJs = (js) => {
+        if (!(js instanceof HTMLScriptElement) || js._reloaded) {
             return
         }
-        // force script reload
-        if (node.tagName === 'SCRIPT' && !node._altered) {
-            const parent = node.parentElement
-            parent?.removeChild(node)
-            node = node.cloneNode(true)
-            // prevent recursion in mu observer
-            node._altered = true
-            if (node.src) {
-                node.src = rewrite(node.src)
-            }
-            node.textContent = rewriteJs(node.textContent)
-            parent?.appendChild(node)
-        } else if (node.src) {
-            node.src = rewrite(node.src)
+        const parent = js.parentElement
+        parent?.removeChild(js)
+        js = js.cloneNode(true)
+        // prevent recursion in mu observer
+        js._reloaded = true
+        if (js.src) {
+            js.src = rewrite(js.src)
+        }
+        js.textContent = rewriteJs(js.textContent)
+        parent?.appendChild(js)
+    }
+
+    const alterElement = (e) => {
+        if (!(e instanceof Element)) {
+            return
+        }
+        if (e.tagName === 'SCRIPT') {
+            reloadJs(e)
+        } else if (e.src) {
+            e.src = rewrite(e.src)
         }
         // imageset
-        if (node.tagName === 'IMG' && node.srcset) {
-            node.srcset = rewriteImgSet(node.srcset)
+        if (e.tagName === 'IMG' && e.srcset) {
+            e.srcset = rewriteImgSet(e.srcset)
         }
-        if (node.href) {
-            node.href = rewrite(node.href)
+        if (e.href) {
+            e.href = rewrite(e.href)
         }
         // form
-        if (node.action) {
-            node.action = rewrite(node.action)
+        if (e.action) {
+            e.action = rewrite(e.action)
         }
         // button, input
-        if (node.formaction) {
-            node.formaction = rewrite(node.formaction)
+        if (e.formaction) {
+            e.formaction = rewrite(e.formaction)
         }
     }
 
     const attrSelector = urlAttr.map(a => '[' + a + ']').join(',')
     document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll(attrSelector).forEach(doRewrite)
+        document.querySelectorAll(attrSelector).forEach(alterElement)
         // for iframe host page
         if (window.parent === window) {
             return
@@ -167,6 +174,11 @@
         }, '*')
     })
 
+    // hack: fix that mutation event returns script element
+    // with incomplete text content
+    // @see https://github.com/whatwg/dom/issues/1116
+    // @see https://jsfiddle.net/64cgrmz5/1/
+    const pendingScripts = []
     // rewrite links in dynamic elements
     const observer = new MutationObserver((muList) => {
         for (const mutation of muList) {
@@ -177,8 +189,15 @@
                 if (!(item instanceof Element)) {
                     return
                 }
-                doRewrite(item)
-                item.querySelectorAll(attrSelector).forEach(doRewrite)
+                if (item instanceof HTMLScriptElement) {
+                    pendingScripts.push(item)
+                    return
+                }
+                while (pendingScripts.length) {
+                    reloadJs(pendingScripts.shift())
+                }
+                alterElement(item)
+                item.querySelectorAll(attrSelector).forEach(alterElement)
             })
         }
     })
