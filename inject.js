@@ -4,7 +4,7 @@
     const rewrite = (oldUrl) => {
         const url = String(oldUrl)
         if (url.startsWith('/')) {
-            return '/' + ORIGIN + url
+            return MY_SERVER + '/' + ORIGIN + url
         }
         if (!URL.canParse(url)) {
             return oldUrl
