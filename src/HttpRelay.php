@@ -145,6 +145,9 @@ class HttpRelay extends Worker
         if (defined('CURLOPT_XFERINFOFUNCTION')) {
             $curlOpt[CURLOPT_XFERINFOFUNCTION] = $cancel;
         } else {
+            // progress function isn't reliable with slow transmission
+            $curlOpt[CURLOPT_LOW_SPEED_LIMIT] = 1;
+            $curlOpt[CURLOPT_LOW_SPEED_TIME] = 5;
             $curlOpt[CURLOPT_PROGRESSFUNCTION] = $cancel;
         }
 
@@ -166,7 +169,7 @@ class HttpRelay extends Worker
      * Detect client disconnect by sending empty tcp payload
      *
      * @param TcpConnection $conn
-     * @return integer 1 => disconnected, 0 => valid
+     * @return integer 1 => disconnected, 0 => alive
      */
     private function probeClient(TcpConnection $conn): int
     {
