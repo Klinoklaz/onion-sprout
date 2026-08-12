@@ -71,7 +71,7 @@
 
     // deal with js remote import etc.
     const rewriteJs = (js) => {
-        const r = /(['"])\s*(https?:\/\/.*?)\1/g
+        const r = /(['"`])\s*(https?:\/\/.*?)\1/g
         return js.replace(r, (match, s1, s2) =>
             new URL(s2).hostname === myServerObj.hostname
                 ? match : s1 + MY_SERVER + '/' + s2 + s1)

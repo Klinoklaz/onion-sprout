@@ -28,8 +28,8 @@ class HttpRelay extends Worker
     private const string INJECT_JS = __DIR__ . '/../inject.js';
 
     private int $logLevel;
-    private string $injectJs;
     private string $log;
+    private string $injectJs;
     private \CurlHandle $ch;
     private array $curlOpt = self::INIT_CURLOPT;
     private array $prefixRules;
@@ -233,8 +233,12 @@ class HttpRelay extends Worker
 
         $statusCode = $hMatch[2] ?? 200;
         $body = substr($res, $hSize);
+        $contentType = $headers['Content-Type'] ?? '';
         // alter js behavior
-        if (strpos($headers['Content-Type'] ?? '', 'text/html') !== false) {
+        if (preg_match('/(?:java|ecma)script/i', $contentType)) {
+            $body = preg_replace('/(["\'`])\s*(https?:\/\/.*?)\1/i',
+                '$1' . $urlPrefix . '/$2$1', $body);
+        } elseif (str_contains($contentType, 'text/html')) {
             $js = str_replace(
                 ['MY_SERVER', 'ORIGIN'],
                 ["'$urlPrefix'", "'$tOrigin'"], $this->injectJs);
