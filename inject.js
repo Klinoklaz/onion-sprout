@@ -44,30 +44,6 @@
     XMLHttpRequest.prototype.open = function(method, url, ...args) {
         return realOpen.call(this, method, rewrite(url), ...args)
     }
-    /*
-    if (navigator.sendBeacon) {
-        const realSendBeacon = navigator.sendBeacon.bind(navigator)
-        navigator.sendBeacon = function(url, data) {
-            return realSendBeacon(rewrite(url), data)
-        }
-    }
-    const RealWorker = window.Worker
-    if (RealWorker) {
-        window.Worker = function(url, options) {
-            return new RealWorker(rewrite(url), options)
-        }
-        window.Worker.prototype = RealWorker.prototype
-    }
-    const RealWebSocket = window.WebSocket
-    if (RealWebSocket) {
-        window.WebSocket = function(url, protocols) {
-            return protocols === undefined
-                ? new RealWebSocket(rewrite(url))
-                : new RealWebSocket(rewrite(url), protocols)
-        }
-        window.WebSocket.prototype = RealWebSocket.prototype
-    }
-    */
 
     // deal with js remote import etc.
     const rewriteJs = (js) => {
@@ -166,6 +142,11 @@
         if (window.parent === window) {
             return
         }
+        window.addEventListener('message', e => {
+            if (e.data?.name === 'SUBFRAME_PRINT') {
+                window.print()
+            }
+        })
         window.parent.postMessage({
             name: 'SUBFRAME_INFO',
             title: document.querySelector('title')?.innerText,
@@ -202,4 +183,6 @@
         }
     })
     observer.observe(document.documentElement, {childList: true, subtree: true})
+
+    document.currentScript?.remove() // prevent self conflict
 })()
