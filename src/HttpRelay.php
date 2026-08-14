@@ -9,7 +9,7 @@ use Workerman\Worker;
 
 class HttpRelay extends Worker
 {
-    private const array INIT_CURLOPT = [
+    private const INIT_CURLOPT = [
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_AUTOREFERER => true,
         CURLOPT_SSL_VERIFYPEER => false,
@@ -20,17 +20,18 @@ class HttpRelay extends Worker
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
     ];
 
-    private const int LOG_DEBUG = 0;
-    private const int LOG_INFO = 1;
-    private const int LOG_WARNING = 2;
-    private const int LOG_ERROR = 3;
-    private const int PROBE_INTERVAL = 2;
-    private const string INJECT_JS = __DIR__ . '/../inject.js';
+    private const LOG_DEBUG = 0;
+    private const LOG_INFO = 1;
+    private const LOG_WARNING = 2;
+    private const LOG_ERROR = 3;
+    private const PROBE_INTERVAL = 2;
+    private const INJECT_JS = __DIR__ . '/../inject.js';
 
     private int $logLevel;
     private string $log;
     private string $injectJs;
     private \CurlHandle $ch;
+    private int $curlTimeout;
     private array $curlOpt = self::INIT_CURLOPT;
     private array $prefixRules;
 
@@ -49,7 +50,8 @@ class HttpRelay extends Worker
                 = $config('PROXY_TYPE', CURLPROXY_SOCKS5_HOSTNAME);
             $this->curlOpt[CURLOPT_PROXYUSERPWD] = $config('PROXY_AUTH');
         }
-        $this->curlOpt[CURLOPT_TIMEOUT] = $config('REQUEST_TIMEOUT', 30);
+        $this->curlTimeout = $config('REQUEST_TIMEOUT', 30);
+        $this->curlOpt[CURLOPT_TIMEOUT] = $this->curlTimeout;
 
         $this->logLevel = $config('LOG_LEVEL', self::LOG_ERROR);
         $this->injectJs = file_get_contents(self::INJECT_JS);
@@ -140,6 +142,7 @@ class HttpRelay extends Worker
         }
 
         // setup cancel function
+        $conn->lastProbe = time();
         $cancel = fn(): int => $this->probeClient($conn);
         $curlOpt[CURLOPT_NOPROGRESS] = false;
         if (defined('CURLOPT_XFERINFOFUNCTION')) {
@@ -147,7 +150,7 @@ class HttpRelay extends Worker
         } else {
             // progress function isn't reliable with slow transmission
             $curlOpt[CURLOPT_LOW_SPEED_LIMIT] = 1;
-            $curlOpt[CURLOPT_LOW_SPEED_TIME] = 5;
+            $curlOpt[CURLOPT_LOW_SPEED_TIME] = $this->curlTimeout / 2;
             $curlOpt[CURLOPT_PROGRESSFUNCTION] = $cancel;
         }
 
@@ -180,11 +183,11 @@ class HttpRelay extends Worker
         ])) {
             return 1;
         }
-        static $start = time();
-        if (($now = time()) - $start < self::PROBE_INTERVAL) {
+        $now = time();
+        if ($now - $conn->lastProbe < self::PROBE_INTERVAL) {
             return 0;
         }
-        $start = $now;
+        $conn->lastProbe = $now;
         $socket = $conn->getSocket();
         try {
             $res = @fwrite($socket, '');

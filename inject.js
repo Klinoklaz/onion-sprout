@@ -1,4 +1,10 @@
 (() => {
+    // deal with auto resolve in redirection
+    if (!/^\/https?:\/\//.test(location.pathname)) {
+        history.replaceState(null, '', MY_SERVER + '/' + ORIGIN
+            + location.href.slice(location.origin.length))
+    }
+
     const myServerObj = new URL(MY_SERVER)
 
     const rewrite = (oldUrl) => {
