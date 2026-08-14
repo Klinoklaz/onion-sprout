@@ -238,12 +238,12 @@ class HttpRelay extends Worker
         if (preg_match('/(?:java|ecma)script/i', $contentType)) {
             $body = preg_replace('/(["\'`])\s*(https?:\/\/.*?)\1/i',
                 '$1' . $urlPrefix . '/$2$1', $body);
-            // deal with base64 encoded links
-            $f = fn(array $m): string
-                => $m[1] . base64_encode(
-                    $urlPrefix . '/' . base64_decode($m[2])) . $m[1];
-            $body = preg_replace_callback(
-                '/([\'"`])(aHR0c(?:HM6Ly|DovL)[^=]{2,}.*?)\1/i', $f, $body);
+            // hack domain guard
+            $host = parse_url($urlPrefix, PHP_URL_HOST);
+            $body = preg_replace(
+                // 127.0.0.1|localhost
+                '/(["\'`])(?:MTI3LjAuMC4x|bG9jYWxob3N0)\1/',
+                '$1' . base64_encode($host) . '$1', $body, 1);
         } elseif (str_contains($contentType, 'text/html')) {
             $js = str_replace(
                 ['MY_SERVER', 'ORIGIN'],
