@@ -82,21 +82,21 @@ class HttpRelay extends Worker
             return;
         }
 
-        $targetUrl = substr($request->uri(), 1);
+        $targetUrl = $reqUri = substr($request->uri(), 1);
         @[$tOrigin, $tHost] = $this->extractOriginAndHost($targetUrl);
         // js import, css include etc., target only has path
         if (!$tHost) {
-            @[$tOrigin, $tHost] = $this->extract2ndOriginAndHost(
-                $request->header('referer') ?? '');
-            $targetUrl = $tOrigin . '/' . $targetUrl;
+            $referer = $request->header('referer') ?? '';
+            @[$tOrigin, $tHost] = $this->extract2ndOriginAndHost($referer);
+            $targetUrl = $prefix . '/' . $tOrigin . '/' . $targetUrl;
         }
         if (!$tHost) {
-            $conn->close(new Response(400, [],
-                "Unable to parse url: $targetUrl"));
+            $conn->close(new Response(
+                400, [], "Unable to parse url: $reqUri"));
             return;
         }
-        // target is current server
-        if (!empty($this->prefixRules[$tHost])) {
+        // target is current server / url incomplete
+        if (!empty($this->prefixRules[$tHost]) || $referer) {
             $conn->send(new Response(308, ['Location' => $targetUrl]));
             return;
         }
