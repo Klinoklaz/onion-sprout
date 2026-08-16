@@ -3,32 +3,58 @@
 set -eu
 . .env
 
+# colored prefix
+INFO="[$(tput setaf 2)INFO$(tput sgr0)]"
+NOTE="[$(tput setaf 4)NOTE$(tput sgr0)]"
+WARN="[$(tput setaf 3)WARN$(tput sgr0)]"
+
 if [ -z "$DEPLOY_PVID" ]; then
     DEPLOY_PVID=$(
         ssh -q "$DEPLOY_HOST" "php -r 'echo PHP_VERSION_ID;'")
     sed -i "s/DEPLOY_PVID=.*/DEPLOY_PVID=$DEPLOY_PVID/" .env
-    echo "[NOTE] Server PHP version: $DEPLOY_PVID, .env updated"
+    echo "$INFO Server PHP version: $DEPLOY_PVID, .env updated"
 fi
 
-inc_vendor="vendor/"
-exc_composer=""
+# interactive mode
+MODE_I=
+[ "${1:-}" = "i" ] && MODE_I=1
+
+INCLUDE="vendor/"
+EXCLUDE=
 if [[ "$DEPLOY_PVID" < 80200 ]]; then
-    inc_vendor=""
-    exc_composer="composer*"
-    echo "[WARN] Server PHP version is incompatible with current dependencies, ignoring package files."
-    read -p $'[WARN] You must manually update packages (if any), enter the command:\n' pkg_update
-    [ -n "$pkg_update" ] && ssh -q "$DEPLOY_HOST" "cd $DEPLOY_PATH; $pkg_update"
+    INCLUDE=
+    EXCLUDE="composer*"
+    echo "$WARN Server PHP version is incompatible with" \
+        "current dependencies, ignoring package files."
+    if [ -n "$MODE_I" ]; then
+        echo "$NOTE Enter the command to manually " \
+            "update packages, if any:"
+        read PKG_UPDATE
+        [ -n "$PKG_UPDATE" ] && \
+            ssh -q "$DEPLOY_HOST" "cd $DEPLOY_PATH; $PKG_UPDATE"
+    fi
 fi
 
-echo "[NOTE] rsync begin."
+if [ -n "$MODE_I" ]; then
+    read -r -n 1 -p "$NOTE Edit server .env file? (y=yes)" \
+        EDIT_ENV
+    if [ "$EDIT_ENV" = "y" ]; then
+        echo
+        echo "$INFO Opening server .env:"
+        ssh -q "$DEPLOY_HOST" "vim $DEPLOY_PATH/.env"
+    fi
+fi
+
+echo "$INFO rsync begins."
 rsync --compress --recursive --verbose \
     --human-readable --progress \
-    --include="$inc_vendor" \
+    --include="$INCLUDE" \
     --exclude=".git*" \
     --exclude="deploy.sh" \
-    --exclude="$exc_composer" \
+    --exclude="$EXCLUDE" \
     --exclude-from=".gitignore" \
     --times --delete ./ "$DEPLOY_HOST:$DEPLOY_PATH/"
 
-echo "[NOTE] Restarting server."
-ssh -q "$DEPLOY_HOST" "cd $DEPLOY_PATH; php main.php restart -d; php main.php status"
+echo "$INFO Restarting server."
+ssh -q "$DEPLOY_HOST" "cd $DEPLOY_PATH; php main.php restart -d;" \
+    "php main.php status"
