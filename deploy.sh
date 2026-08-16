@@ -31,4 +31,4 @@ rsync --compress --recursive --verbose \
     --times --delete ./ "$DEPLOY_HOST:$DEPLOY_PATH/"
 
 echo "[NOTE] Restarting server."
-ssh -q "$DEPLOY_HOST" "php $DEPLOY_PATH/main.php restart -d; php $DEPLOY_PATH/main.php status"
+ssh -q "$DEPLOY_HOST" "cd $DEPLOY_PATH; php main.php restart -d; php main.php status"
