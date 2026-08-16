@@ -1,16 +1,24 @@
 (() => {
+    // wayback machine has its own rewriter, avoid conflict
+    if (/(?:\.|^)archive.org$/.test(location.hostname)) {
+        return
+    }
+    // macros encoded to circumvent detection by wm rewriter
+    const _origin = atob(ORIGIN)
+    const _myServer = atob(MY_SERVER)
+
     // deal with auto resolve in redirection
     if (!/^\/https?:\/\//.test(location.pathname)) {
-        history.replaceState(null, '', MY_SERVER + '/' + ORIGIN
+        history.replaceState(null, '', _myServer + '/' + _origin
             + location.href.slice(location.origin.length))
     }
 
-    const myServerObj = new URL(MY_SERVER)
+    const myServerObj = new URL(_myServer)
 
     const rewrite = (oldUrl) => {
         const url = String(oldUrl)
         if (url.startsWith('/')) {
-            return MY_SERVER + '/' + ORIGIN + url
+            return _myServer + '/' + _origin + url
         }
         if (!URL.canParse(url)) {
             return oldUrl
@@ -18,12 +26,12 @@
         const urlObj = new URL(url)
         if (['http:', 'https:'].includes(urlObj.protocol)
             && urlObj.hostname !== myServerObj.hostname) {
-            return MY_SERVER + '/' + url
+            return _myServer + '/' + url
         }
         // deal with auto resolve
         if (urlObj.hostname === myServerObj.hostname
             && !/^\/https?:\/\//.test(urlObj.pathname)) {
-            return MY_SERVER + '/' + ORIGIN
+            return _myServer + '/' + _origin
                 + url.slice(urlObj.origin.length)
         }
         if (urlObj.protocol === 'data:'
@@ -56,7 +64,7 @@
         const r = /(['"`])\s*(https?:\/\/.*?)\1/g
         return js.replace(r, (match, s1, s2) =>
             new URL(s2).hostname === myServerObj.hostname
-                ? match : s1 + MY_SERVER + '/' + s2 + s1)
+                ? match : s1 + _myServer + '/' + s2 + s1)
     }
 
     // imageset

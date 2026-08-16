@@ -96,7 +96,7 @@ class HttpRelay extends Worker
             return;
         }
         // target is current server / url incomplete
-        if (!empty($this->prefixRules[$tHost]) || $referer) {
+        if (!empty($this->prefixRules[$tHost]) || !empty($referer)) {
             $conn->send(new Response(308, ['Location' => $targetUrl]));
             return;
         }
@@ -246,11 +246,15 @@ class HttpRelay extends Worker
             $body = preg_replace(
                 // 127.0.0.1|localhost
                 '/(["\'`])(?:MTI3LjAuMC4x|bG9jYWxob3N0)\1/',
-                '$1' . base64_encode($host) . '$1', $body, 1);
+                '$1' . base64_encode($host) . '$1', $body);
         } elseif (str_contains($contentType, 'text/html')) {
+            // prevent conflict with wayback machine rewriter
+            $urlPrefix = "'" . base64_encode($urlPrefix) . "'";
+            $tOrigin = "'" . base64_encode($tOrigin) . "'";
+            // inject
             $js = str_replace(
                 ['MY_SERVER', 'ORIGIN'],
-                ["'$urlPrefix'", "'$tOrigin'"], $this->injectJs);
+                [$urlPrefix, $tOrigin], $this->injectJs);
             $js = "\n<script>\n" . $js . "\n</script>\n";
             if (preg_match('/<(?:head|body)(?:\s+[^>]+)?>/i',
                 $body, $m, PREG_OFFSET_CAPTURE))
