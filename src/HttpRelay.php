@@ -15,6 +15,7 @@ class HttpRelay extends Worker
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => 0,
         CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_ACCEPT_ENCODING => '',
         CURLOPT_HEADER => true, // retrieve original response header
         // avoid reassemble of http2 response
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
@@ -111,8 +112,9 @@ class HttpRelay extends Worker
                 case 'host':
                     $reqHeader[] = 'Host: ' . $tHost;
                     break;
+                // auto decompression enabled
                 case 'accept-encoding':
-                    break; // disable compression
+                    break;
                 case 'referer':
                     $pLen = strlen($prefix);
                     if (substr($v, 0, $pLen) === $prefix) {
@@ -229,8 +231,10 @@ class HttpRelay extends Worker
             $headers['Content-Security-Policy'],
             $headers['Content-Security-Policy-Report-Only'],
         );
-        // data already assembled by curl and doesn't contain end marker
-        if (strtolower($headers['Transfer-Encoding'] ?? '') === 'chunked') {
+        $te = $headers['Transfer-Encoding'] ?? '';
+        // data already assembled by curl
+        // and doesn't contain end marker
+        if (strcasecmp($te, 'chunked') === 0) {
             unset($headers['Transfer-Encoding']);
         }
 
@@ -239,14 +243,19 @@ class HttpRelay extends Worker
         $contentType = $headers['Content-Type'] ?? '';
         // alter js behavior
         if (preg_match('/(?:java|ecma)script/i', $contentType)) {
-            $body = preg_replace('/(["\'`])\s*(https?:\/\/.*?)\1/i',
-                '$1' . $urlPrefix . '/$2$1', $body);
-            // hack domain guard
             $host = parse_url($urlPrefix, PHP_URL_HOST);
-            $body = preg_replace(
+            $body = preg_replace([
+                '/(["\'`])\s*(https?:\/\/.*?)\1/i',
+                // hack known anti-embedding
+                '/(\W)window\s*!=\s*top(\W)/',
+                // hack domain guard
                 // 127.0.0.1|localhost
                 '/(["\'`])(?:MTI3LjAuMC4x|bG9jYWxob3N0)\1/',
-                '$1' . base64_encode($host) . '$1', $body);
+            ], [
+                '$1' . $urlPrefix . '/$2$1',
+                '$1false$2',
+                '$1' . base64_encode($host) . '$1',
+            ], $body);
         } elseif (str_contains($contentType, 'text/html')) {
             // prevent conflict with wayback machine rewriter
             $urlPrefix = "'" . base64_encode($urlPrefix) . "'";
@@ -260,8 +269,16 @@ class HttpRelay extends Worker
                 $body, $m, PREG_OFFSET_CAPTURE))
             {
                 $injectPos = $m[0][1] + strlen($m[0][0]);
-                $body = substr($body, 0, $injectPos) . $js . substr($body, $injectPos);
+                $body = substr_replace($body, $js, $injectPos, 0);
             }
+        }
+
+        $encoding = $headers['Content-Encoding'] ?? '';
+        if (strcasecmp($encoding, 'gzip') === 0
+            && $gzBody = gzencode($body, 9)) {
+            $body = $gzBody;
+        } elseif (isset($gzBody)) {
+            unset($headers['Content-Encoding']);
         }
         return new Response($statusCode, $headers, $body);
     }
