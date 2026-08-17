@@ -257,6 +257,19 @@ class HttpRelay extends Worker
                 '$1' . base64_encode($host) . '$1',
             ], $body);
         } elseif (str_contains($contentType, 'text/html')) {
+            $jsPattern = [
+                '/https?:\/\/\w+/i', '/(\W)window\s*!=\s*top(\W)/'
+            ];
+            $jsReplace = ["$urlPrefix/$0", '$1false$2'];
+            $body = preg_replace_callback_array([
+                '/<script.*?>.*?<\/script>/is' =>
+                    fn(array $m): string =>
+                        preg_replace($jsPattern, $jsReplace, $m[0]),
+                // any links inside a tag
+                '/(<\w+\s+[^>]*?)(https?:\/\/.+?)>/i' =>
+                    fn(array $m): string => "$m[1]$urlPrefix/$m[2]>",
+            ], $body);
+
             // prevent conflict with wayback machine rewriter
             $urlPrefix = "'" . base64_encode($urlPrefix) . "'";
             $tOrigin = "'" . base64_encode($tOrigin) . "'";
@@ -265,6 +278,8 @@ class HttpRelay extends Worker
                 ['MY_SERVER', 'ORIGIN'],
                 [$urlPrefix, $tOrigin], $this->injectJs);
             $js = "\n<script>\n" . $js . "\n</script>\n";
+            // can't use preg_replace here since
+            // `$js` contains back reference strings
             if (preg_match('/<(?:head|body)(?:\s+[^>]+)?>/i',
                 $body, $m, PREG_OFFSET_CAPTURE))
             {
