@@ -198,5 +198,11 @@
     })
     observer.observe(document.documentElement, {childList: true, subtree: true})
 
+    // deleting set-cookie header at server side isn't enough
+    window.addEventListener('beforeunload', () => {
+        const delList = document.cookie.split(';').map(
+            item => item + '; Expires=Thu Jan 01 1970 00:00:00 GMT; Path=/')
+        delList.forEach(item => {document.cookie = item})
+    })
     document.currentScript?.remove() // prevent self conflict
 })()
