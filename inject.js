@@ -230,7 +230,7 @@
     // deleting set-cookie header at server side isn't enough
     window.addEventListener('beforeunload', () => {
         const delList = document.cookie.split(';').map(
-            item => item + '; Expires=Thu Jan 01 1970 00:00:00 GMT; Path=/')
+            item => item + '; Max-Age=60; Path=/')
         delList.forEach(item => {document.cookie = item})
     })
     document.currentScript?.remove() // prevent self conflict
