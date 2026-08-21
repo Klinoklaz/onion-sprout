@@ -12,6 +12,24 @@
         history.replaceState(null, '', _myServer + '/' + _origin
             + location.href.slice(location.origin.length))
     }
+    // deal with abs path in history manipulation
+    const isAbsPath = (url) => typeof url === 'string'
+        && url.startsWith('/')
+        && !/^\/https?:\/\//.test(url)
+    const realPushState = history.pushState
+    history.pushState = function(state, unused, url) {
+        if (isAbsPath(url)) {
+            url = '/' + _origin + url
+        }
+        realPushState.call(this, state, unused, url)
+    }
+    const realReplaceState = history.replaceState
+    history.replaceState = function(state, unused, url) {
+        if (isAbsPath(url)) {
+            url = '/' + _origin + url
+        }
+        realReplaceState.call(this, state, unused, url)
+    }
 
     const myServerObj = new URL(_myServer)
 
