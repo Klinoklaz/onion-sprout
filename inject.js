@@ -157,8 +157,19 @@
             return
         }
         window.addEventListener('message', e => {
-            if (e.data?.name === 'SUBFRAME_PRINT') {
-                window.print()
+            switch (e.data?.name) {
+                case 'SUBFRAME_PRINT':
+                    window.print()
+                    break
+                case 'SUBFRAME_RELOAD':
+                    location.reload()
+                    break
+                case 'SUBFRAME_BACK':
+                    history.back()
+                    break
+                case 'SUBFRAME_FORWARD':
+                    history.forward()
+                    break
             }
         })
         window.parent.postMessage({
