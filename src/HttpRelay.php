@@ -225,6 +225,7 @@ class HttpRelay extends Worker
 
         $headers['Access-Control-Allow-Origin'] = $urlPrefix;
         unset(
+            $headers['Content-Encoding'],
             $headers['Content-Length'],
             $headers['Set-Cookie'],
             $headers['X-Frame-Options'], // allow embedding
@@ -288,12 +289,9 @@ class HttpRelay extends Worker
             }
         }
 
-        $encoding = $headers['Content-Encoding'] ?? '';
-        if (strcasecmp($encoding, 'gzip') === 0
-            && $gzBody = gzencode($body, 9)) {
+        if ($gzBody = gzencode($body, 9)) {
             $body = $gzBody;
-        } elseif (isset($gzBody)) {
-            unset($headers['Content-Encoding']);
+            $headers['Content-Encoding'] = 'gzip';
         }
         return new Response($statusCode, $headers, $body);
     }
