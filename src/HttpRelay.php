@@ -35,6 +35,7 @@ class HttpRelay extends Worker
     private int $curlTimeout;
     private array $curlOpt = self::INIT_CURLOPT;
     private array $prefixRules;
+    private int $maxDownloadSize;
 
     public function __construct(callable $config)
     {
@@ -53,8 +54,9 @@ class HttpRelay extends Worker
         }
         $this->curlTimeout = $config('REQUEST_TIMEOUT', 30);
         $this->curlOpt[CURLOPT_TIMEOUT] = $this->curlTimeout;
+        $this->maxDownloadSize = $config('DOWNLOAD_SIZE', 0);
 
-        $this->logLevel = $config('LOG_LEVEL', self::LOG_ERROR);
+        $this->logLevel = $config('LOG_LEVEL', self::LOG_WARNING);
         $this->injectJs = file_get_contents(self::INJECT_JS);
 
         // ['hostname' => 'prefix']
@@ -145,7 +147,8 @@ class HttpRelay extends Worker
 
         // setup cancel function
         $conn->lastProbe = time();
-        $cancel = fn(): int => $this->probeClient($conn);
+        $cancel = fn(\CurlHandle $ch, int $td, int $dl): int
+            => $this->curlCancelFunc($td, $dl, $conn);
         $curlOpt[CURLOPT_NOPROGRESS] = false;
         if (defined('CURLOPT_XFERINFOFUNCTION')) {
             $curlOpt[CURLOPT_XFERINFOFUNCTION] = $cancel;
@@ -168,6 +171,23 @@ class HttpRelay extends Worker
         $conn->close(new Response(502, [],
             'Network error, unable to get response from ' . $targetUrl));
         $this->internalLog($error . " ($targetUrl)");
+    }
+
+    private function curlCancelFunc(
+        int $remaining, int $downloaded, TcpConnection $conn): int
+    {
+        if ($this->maxDownloadSize > 0
+            && ($remaining + $downloaded > $this->maxDownloadSize)) {
+            $conn->close(new Response(502, [], 'File too large!'));
+            $this->internalLog('Download size exceeds limit, '
+                . "downloaded $downloaded bytes, "
+                . "remaining $remaining bytes", self::LOG_WARNING);
+            return 1;
+        }
+        if (($clientAlive = $this->probeClient($conn)) > 0) {
+            $this->internalLog('Client connection closed', self::LOG_INFO);
+        }
+        return $clientAlive;
     }
 
     /**
